@@ -1,0 +1,206 @@
+import pickle
+import pygame
+
+from settings import Settings
+from ship import Ship
+from bullet import Bullet
+from alien import Alien
+
+class AlienInvasion:
+    """Класс для управления ресурсами и поведением игры."""
+
+    def __init__(self):
+        """Инициализирует игру и создаёт игровые ресурсы."""
+        pygame.init()
+        self.settings = Settings()
+
+        self.screen = pygame.display.set_mode(
+            (self.settings.screen_width, self.settings.screen_height)
+        )
+        pygame.display.set_caption("Инопланетное вторжение")
+
+        self.background_image = pygame.image.load("images/spaceImage.jpg")
+
+        self.background_image = pygame.transform.scale(
+            self.background_image,
+            (self.settings.screen_width, self.settings.screen_height)
+        )
+
+        self.heart_image = pygame.image.load("icons/heart.svg")
+        self.heart_image = pygame.transform.scale(self.heart_image, (32, 32))
+
+        self.score = 0
+        self.level = 0
+        self.ship = Ship(self)
+        self.bullets = pygame.sprite.Group()
+        self.aliens = pygame.sprite.Group()
+        self.health = self.settings.health
+
+        self.game_active = True
+        self.running = False
+
+    def run_game(self):
+        """Запуск основного цикла игры."""
+        self._create_fleet()
+        self.running = True
+
+        while self.running:
+            self._check_events()
+            if self.game_active:
+                self.ship.update()
+                self._update_bullets()
+                self._update_aliens()
+                self._check_bullet_alien_collisions()
+            self._update_screen()
+
+    def save_game(self, filename='savegame.pkl'):
+        """Сохраняет текущий уровень, очки и здоровье в файл."""
+        game_data = {
+            "level": self.level,
+            "score": self.score,
+            "health": self.health,
+        }
+        with open(filename, "wb") as file:
+            pickle.dump(game_data, file)
+        print("Игра сохранена!")
+
+    def load_game(self, filename='savegame.pkl'):
+        """Загружает сохраненные данные игры."""
+        try:
+            with open(filename, "rb") as file:
+                game_data = pickle.load(file)
+                self.level = game_data["level"]
+                self.score = game_data["score"]
+                self.health = game_data["health"]
+
+            self.aliens.empty()
+            self.bullets.empty()
+            self._create_fleet()
+            print("Игра загружена!")
+        except FileNotFoundError:
+            print("Файл сохранения не найден!")
+
+    def _check_events(self):
+        """Обрабатывает события клавиатуры и мыши."""
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.running = False
+            elif event.type == pygame.KEYDOWN:
+                self._check_keydown_events(event)
+            elif event.type == pygame.KEYUP:
+                self._check_keyup_events(event)
+
+    def _check_keydown_events(self, event):
+        if event.key == pygame.K_RIGHT:
+            self.ship.moving_right = True
+        elif event.key == pygame.K_LEFT:
+            self.ship.moving_left = True
+        elif event.key == pygame.K_SPACE:
+            self._fire_bullet()
+        elif event.key == pygame.K_s:
+            self.save_game()
+        elif event.key == pygame.K_l:
+            self.load_game()
+        elif event.key == pygame.K_q:
+            self.running = False
+
+    def _check_keyup_events(self, event):
+        if event.key == pygame.K_RIGHT:
+            self.ship.moving_right = False
+        elif event.key == pygame.K_LEFT:
+            self.ship.moving_left = False
+
+    def _fire_bullet(self):
+        """Создаёт новый снаряд и добавляет его в группу bullets."""
+        if len(self.bullets) < self.settings.bullets_allowed:
+            new_bullet = Bullet(self)
+            self.bullets.add(new_bullet)
+
+    def _update_bullets(self):
+        """Обновляет позиции снарядов и удаляет старые снаряды."""
+        self.bullets.update()
+
+        for bullet in self.bullets.copy():
+            if bullet.rect.bottom <= 0:
+                self.bullets.remove(bullet)
+
+    def _create_fleet(self):
+        """Создаёт флот инопланетян."""
+        alien = Alien(self)
+        alien_width, alien_height = alien.rect.size
+        available_space_x = self.settings.screen_width - (2 * alien_width)
+        number_aliens_x = available_space_x // (2 * alien_width)
+
+        ship_height = self.ship.rect.height
+        available_space_y = (self.settings.screen_height -
+                             (3 * alien_height) - ship_height)
+        number_rows = available_space_y // (2 * alien_height)
+
+        for row_number in range(number_rows):
+            for alien_number in range(number_aliens_x):
+                self._create_alien(alien_number, row_number)
+
+    def _create_alien(self, alien_number, row_number):
+        """Создаёт одного инопланетянина и помещает его в ряд."""
+        alien = Alien(self)
+        alien_width = alien.rect.width
+        alien.x = alien_width + 2 * alien_width * alien_number
+        alien.rect.x = alien.x
+        alien.rect.y = alien.rect.height + 2 * alien.rect.height * row_number
+        self.aliens.add(alien)
+
+    def _update_aliens(self):
+        """Проверяет, достиг ли флот края, и обновляет позиции всех инопланетян."""
+        self.aliens.update()
+
+        for alien in self.aliens.sprites():
+            if alien.rect.bottom >= self.settings.screen_height:
+                self.health -= 1
+                self.aliens.empty()
+                if self.health <= 0:
+                    self.game_active = False
+                else:
+                    self._create_fleet()
+                break
+
+    def _check_bullet_alien_collisions(self):
+        """Обрабатывает столкновение пуль с пришельцами."""
+        self.score += (self.settings.alien_kill_points *
+                       len(pygame.sprite.groupcollide(self.bullets, self.aliens, True, True)))
+
+        if not self.aliens:
+            self.level += 1
+            self._create_fleet()
+
+    def _update_screen(self):
+        """Обновляет изображение на экране и переключается на новый экран."""
+        self.screen.blit(self.background_image, (0, 0))
+
+        if self.game_active:
+            self.ship.blitme()
+            for bullet in self.bullets.sprites():
+                bullet.draw_bullet()
+            self.aliens.draw(self.screen)
+
+            # Отображение здоровья в виде сердечек
+            heart_width = self.heart_image.get_width()
+            heart_spacing = 10
+            start_x = self.settings.screen_width - (heart_width + heart_spacing) * self.settings.health
+            start_y = 10
+
+            for i in range(self.health):
+                heart_x = start_x + (heart_width + heart_spacing) * i
+                self.screen.blit(self.heart_image, (heart_x, start_y))
+        else:
+            font = pygame.font.SysFont(None, 48)
+            message = f"Игра окончена! Ваш счёт: {self.score}"
+            text = font.render(message, True, (255, 255, 255))
+            text_rect = text.get_rect(center=self.screen.get_rect().center)
+            self.screen.blit(text, text_rect)
+
+        pygame.display.flip()
+
+
+if __name__ == '__main__':
+    ai = AlienInvasion()
+    ai.run_game()
