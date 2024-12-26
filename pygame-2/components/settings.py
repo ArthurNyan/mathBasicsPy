@@ -22,3 +22,7 @@ class Settings:
         self.alien_speed = (0.5, 0.2)
         self.alien_speed_increment = (0.1, 0.05)
         self.alien_kill_points = 15
+
+        # Настройки бонусов
+        self.bonus_speed = (0.1, 0.25)
+        self.bonus_spawn_chance = 0.2

@@ -1,6 +1,10 @@
+import os
 import pickle
+import random
 import pygame
+from pygame.mixer import Sound
 
+from components.bonus import Medkit, Shield
 from components.settings import Settings
 from components.ship import Ship
 from components.bullet import Bullet
@@ -32,9 +36,14 @@ class AlienInvasion:
         self.score = 0
         self.level = 0
         self.ship = Ship(self)
+        self.shoot_sound = Sound(os.path.join('sound', 'laser.mp3'))
+        self.enemy_death_sound = Sound(os.path.join('sound', 'point.wav'))
+        self.damage_sound = Sound(os.path.join('sound', 'damage.mp3'))
         self.bullets = pygame.sprite.Group()
         self.aliens = pygame.sprite.Group()
+        self.bonuses = pygame.sprite.Group()
         self.health = self.settings.health
+        self.shield = False
 
         self.game_active = True
         self.running = False
@@ -48,10 +57,22 @@ class AlienInvasion:
             self._check_events()
             if self.game_active:
                 self.ship.update()
+                self._update_bonuses()
                 self._update_bullets()
                 self._update_aliens()
                 self._check_bullet_alien_collisions()
             self._update_screen()
+
+    def spawn_bonus(self):
+        rand = random.random()
+        if rand > 0.5:
+            bonus = Medkit(self)
+        else:
+            bonus = Shield(self)
+        x = random.random() * self.screen.get_width()
+        bonus.x = x
+        bonus.y = 50
+        self.bonuses.add(bonus)
 
     def save_game(self, filename='savegame.pkl'):
         """Сохраняет текущий уровень, очки и здоровье в файл."""
@@ -59,6 +80,7 @@ class AlienInvasion:
             "level": self.level,
             "score": self.score,
             "health": self.health,
+            "shield": self.shield
         }
         with open(filename, "wb") as file:
             pickle.dump(game_data, file)
@@ -72,6 +94,7 @@ class AlienInvasion:
                 self.level = game_data["level"]
                 self.score = game_data["score"]
                 self.health = game_data["health"]
+                self.shield = game_data['shield']
 
             self.aliens.empty()
             self.bullets.empty()
@@ -110,9 +133,21 @@ class AlienInvasion:
         elif event.key == pygame.K_LEFT:
             self.ship.moving_left = False
 
+    def _update_bonuses(self):
+        self.bonuses.update()
+
+        for bonus in self.bonuses:
+            if bonus.rect.colliderect(self.ship.rect):
+                bonus.apply()
+                self.bonuses.remove(bonus)
+            elif bonus.rect.top >= self.settings.screen_height:
+                self.bonuses.remove(bonus)
+                break
+
     def _fire_bullet(self):
         """Создаёт новый снаряд и добавляет его в группу bullets."""
         if len(self.bullets) < self.settings.bullets_allowed:
+            self.shoot_sound.play()
             new_bullet = Bullet(self)
             self.bullets.add(new_bullet)
 
@@ -155,22 +190,33 @@ class AlienInvasion:
 
         for alien in self.aliens.sprites():
             if alien.rect.bottom >= self.settings.screen_height:
-                self.health -= 1
-                self.aliens.empty()
-                if self.health <= 0:
-                    self.game_active = False
-                else:
-                    self._create_fleet()
+                self._damage()
                 break
+
+    def _damage(self):
+        self.damage_sound.play()
+        if not self.shield:
+            self.health -= 1
+        self.shield = False
+        self.aliens.empty()
+        if self.health <= 0:
+            self.game_active = False
+        else:
+            self._create_fleet()
 
     def _check_bullet_alien_collisions(self):
         """Обрабатывает столкновение пуль с пришельцами."""
-        self.score += (self.settings.alien_kill_points *
-                       len(pygame.sprite.groupcollide(self.bullets, self.aliens, True, True)))
+        killed = len(pygame.sprite.groupcollide(self.bullets, self.aliens, True, True))
+        self.score += killed * self.settings.alien_kill_points
 
-        if not self.aliens:
-            self.level += 1
-            self._create_fleet()
+        if killed:
+            self.enemy_death_sound.play()
+            if random.random() <= self.settings.bonus_spawn_chance:
+                self.spawn_bonus()
+            if not self.aliens:
+                self.level += 1
+                self.bullets.empty()
+                self._create_fleet()
 
     def _update_screen(self):
         """Обновляет изображение на экране и переключается на новый экран."""
@@ -181,6 +227,7 @@ class AlienInvasion:
             for bullet in self.bullets.sprites():
                 bullet.draw_bullet()
             self.aliens.draw(self.screen)
+            self.bonuses.draw(self.screen)
 
             # Отображение здоровья в виде сердечек
             heart_width = self.heart_image.get_width()
