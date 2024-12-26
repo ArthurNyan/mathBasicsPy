@@ -1,10 +1,10 @@
 import pickle
 import pygame
 
-from settings import Settings
-from ship import Ship
-from bullet import Bullet
-from alien import Alien
+from components.settings import Settings
+from components.ship import Ship
+from components.bullet import Bullet
+from components.alien import Alien
 
 class AlienInvasion:
     """Класс для управления ресурсами и поведением игры."""
